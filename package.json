@@ -9,7 +9,8 @@
   },
   "scripts": {
     "start": "react-scripts start",
-    "build": "react-scripts build"
+    "build": "react-scripts build",
+    "postbuild": "xcopy api build\api /E /I /Y"
   },
   "browserslist": {
     "production": [
@@ -21,3 +22,4 @@
     ]
   }
 }
+
