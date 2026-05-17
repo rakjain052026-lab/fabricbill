@@ -1,15 +1,6 @@
-
 // ─────────────────────────────────────────────
-// tabs/SettingsTab.jsx
-// Admin-only. Edit shop info, GST config,
-// billing options, and change PINs.
-//
-// Props:
-//   draftSettings    - working copy of settings
-//   setDraftSettings - state setter
-//   handleSaveSettings - async () => void
-//   handleChangeShop - () => void
-//   shopCode         - displayed at top
+// tabs/SettingsTab.jsx (ENHANCED)
+// Updated with: Bank Details, Email, Signatory Name
 // ─────────────────────────────────────────────
 import { useState } from "react";
 import { PAYMENT_MODES } from "../constants";
@@ -48,6 +39,60 @@ export function SettingsTab({ draftSettings, setDraftSettings, handleSaveSetting
             <input value={draftSettings[k] || ""} onChange={(e) => set(k, e.target.value)} style={inp} />
           </div>
         ))}
+      </div>
+
+      {/* FEATURE 6 + 4: Email & Bank Details */}
+      <div style={card}>
+        <div style={{ fontWeight: 700, fontSize: 15, color: "#1e3a5f", marginBottom: 12 }}>📧 Email & Bank Details</div>
+        
+        {/* Email ID */}
+        <div style={{ marginBottom: 12 }}>
+          <label style={lbl}>📧 Email ID (for invoice)</label>
+          <input 
+            value={draftSettings.emailId || ""} 
+            onChange={(e) => set("emailId", e.target.value)} 
+            placeholder="e.g. business@example.com"
+            style={inp} 
+          />
+          <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 4 }}>Will display at bottom of invoice</div>
+        </div>
+
+        {/* Bank Details Section */}
+        <div style={{ background: "#f0fdf4", borderRadius: 10, padding: 12, marginTop: 14 }}>
+          <div style={{ fontWeight: 700, fontSize: 14, color: "#15803d", marginBottom: 10 }}>🏦 Bank Account Details</div>
+          {[
+            ["bankName", "Bank Name"],
+            ["accountNumber", "Account Number"],
+            ["ifscCode", "IFSC Code"],
+            ["accountHolder", "Account Holder Name"],
+          ].map(([k, l]) => (
+            <div key={k} style={{ marginBottom: 10 }}>
+              <label style={lbl}>{l} (optional)</label>
+              <input 
+                value={draftSettings[k] || ""} 
+                onChange={(e) => set(k, e.target.value)} 
+                placeholder={l}
+                style={inp} 
+              />
+            </div>
+          ))}
+          <div style={{ fontSize: 11, color: "#16a34a", marginTop: 8 }}>✅ These details will appear in invoice's "Seller's Bank Detail" section</div>
+        </div>
+      </div>
+
+      {/* FEATURE 3: Signatory Information */}
+      <div style={card}>
+        <div style={{ fontWeight: 700, fontSize: 15, color: "#1e3a5f", marginBottom: 12 }}>✍️ Invoice Signature</div>
+        <div style={{ marginBottom: 10 }}>
+          <label style={lbl}>Authorized Signatory Name (optional)</label>
+          <input 
+            value={draftSettings.signatoryName || ""} 
+            onChange={(e) => set("signatoryName", e.target.value)} 
+            placeholder="e.g. Rajesh Kumar"
+            style={inp} 
+          />
+          <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 4 }}>Name will appear under signature line in invoice</div>
+        </div>
       </div>
 
       {/* Invoice footer */}
