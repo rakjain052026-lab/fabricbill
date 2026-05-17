@@ -1,9 +1,6 @@
 // ─────────────────────────────────────────────
-// tabs/CustomersTab.jsx
-// Search-first approach:
-//   1. User types name or phone to search
-//   2. If not found → show inline Add form
-//   3. Full list shown below search
+// tabs/CustomersTab.jsx (ENHANCED)
+// FEATURE 7: Added GSTIN field for customers
 // ─────────────────────────────────────────────
 import { useState } from "react";
 import { upsertCustomer } from "../lib/api";
@@ -21,9 +18,11 @@ export function CustomersTab({
   const [search, setSearch]           = useState("");
   const [newName, setNewName]         = useState("");
   const [newPhone, setNewPhone]       = useState("");
+  const [newGstin, setNewGstin]       = useState("");   // FEATURE 7: GSTIN field
   const [custError, setCustError]     = useState("");
   const [custSuccess, setCustSuccess] = useState("");
   const [showAddForm, setShowAddForm] = useState(false);
+  const [editingCustomerId, setEditingCustomerId] = useState(null);  // For editing existing customers
 
   const f = (n) => fmt(n, settings.currency);
 
@@ -52,24 +51,67 @@ export function CustomersTab({
     setCustError("");
     setCustSuccess("");
     setShowAddForm(false);
+    setEditingCustomerId(null);
     // Auto-fill phone field if search is numeric
     if (/^\d+$/.test(val)) setNewPhone(val.slice(0, 10));
     else setNewPhone("");
     setNewName("");
+    setNewGstin("");  // FEATURE 7: Reset GSTIN
+  };
+
+  // FEATURE 7: Validate GSTIN format (15 characters, alphanumeric)
+  const validateGstin = (gstin) => {
+    if (!gstin) return true; // Optional field
+    return /^[0-9A-Z]{15}$/.test(gstin.toUpperCase());
   };
 
   const handleCreate = async () => {
     setCustError(""); setCustSuccess("");
     if (!newName.trim()) return setCustError("Name required.");
     if (newPhone && !newPhone.match(/^\d{10}$/)) return setCustError("Enter valid 10-digit number.");
-    if (newPhone && customers.find((c) => c.phone === newPhone)) return setCustError("Phone already registered.");
-    const nc = { id: genId(), name: newName.trim(), phone: newPhone };
-    await upsertCustomer(shopCode, nc);
-    setCustomers((p) => [...p, nc]);
-    setCustSuccess(`"${nc.name}" added!`);
-    setNewName(""); setNewPhone("");
+    if (newPhone && customers.find((c) => c.phone === newPhone && c.id !== editingCustomerId)) return setCustError("Phone already registered.");
+    
+    // FEATURE 7: Validate GSTIN
+    if (!validateGstin(newGstin)) return setCustError("GSTIN must be 15 alphanumeric characters (e.g. 18AABCT1234H1Z0).");
+    
+    if (editingCustomerId) {
+      // Update existing customer
+      const nc = { 
+        id: editingCustomerId, 
+        name: newName.trim(), 
+        phone: newPhone, 
+        gstin: newGstin.toUpperCase() || null  // FEATURE 7: Save GSTIN
+      };
+      await upsertCustomer(shopCode, nc);
+      setCustomers((prev) => prev.map((c) => c.id === editingCustomerId ? nc : c));
+      setCustSuccess(`"${nc.name}" updated!`);
+      setEditingCustomerId(null);
+    } else {
+      // Create new customer
+      const nc = { 
+        id: genId(), 
+        name: newName.trim(), 
+        phone: newPhone, 
+        gstin: newGstin.toUpperCase() || null  // FEATURE 7: Save GSTIN
+      };
+      await upsertCustomer(shopCode, nc);
+      setCustomers((p) => [...p, nc]);
+      setCustSuccess(`"${nc.name}" added!`);
+    }
+    
+    setNewName(""); setNewPhone(""); setNewGstin("");
     setSearch("");
     setShowAddForm(false);
+  };
+
+  // FEATURE 7: Open edit form for customer
+  const handleEditCustomer = (customer) => {
+    setSearch("");
+    setShowAddForm(true);
+    setEditingCustomerId(customer.id);
+    setNewName(customer.name);
+    setNewPhone(customer.phone || "");
+    setNewGstin(customer.gstin || "");
   };
 
   return (
@@ -103,10 +145,12 @@ export function CustomersTab({
           </div>
         )}
 
-        {/* Inline add form */}
+        {/* Inline add/edit form */}
         {showAddForm && (
           <div style={{ marginTop: 12, background: "#f0fdf4", border: "1px solid #86efac", borderRadius: 10, padding: 14 }}>
-            <div style={{ fontWeight: 700, fontSize: 14, color: "#15803d", marginBottom: 10 }}>➕ Add New Customer</div>
+            <div style={{ fontWeight: 700, fontSize: 14, color: "#15803d", marginBottom: 10 }}>
+              {editingCustomerId ? "✏️ Edit Customer" : "➕ Add New Customer"}
+            </div>
             <div style={{ marginBottom: 10 }}>
               <label style={lbl}>Full Name</label>
               <input
@@ -117,7 +161,7 @@ export function CustomersTab({
                 autoFocus
               />
             </div>
-            <div style={{ marginBottom: 12 }}>
+            <div style={{ marginBottom: 10 }}>
               <label style={lbl}>Phone Number (optional)</label>
               <input
                 value={newPhone}
@@ -127,18 +171,31 @@ export function CustomersTab({
                 style={inp}
               />
             </div>
+            
+            {/* FEATURE 7: GSTIN field */}
+            <div style={{ marginBottom: 12, background: "#fff", borderRadius: 8, padding: 10 }}>
+              <label style={lbl}>GSTIN (optional)</label>
+              <input
+                value={newGstin}
+                onChange={(e) => setNewGstin(e.target.value.replace(/[^0-9A-Za-z]/g, "").slice(0, 15).toUpperCase())}
+                placeholder="e.g. 18AABCT1234H1Z0"
+                style={inp}
+              />
+              <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4 }}>15 alphanumeric characters. Will appear on invoice as "Buyer's GSTIN"</div>
+            </div>
+
             {custError   && <div style={{ color: "#dc2626", fontSize: 13, marginBottom: 8, background: "#fee2e2", padding: "6px 10px", borderRadius: 6 }}>⚠ {custError}</div>}
             {custSuccess && <div style={{ color: "#16a34a", fontSize: 13, marginBottom: 8, background: "#f0fdf4", padding: "6px 10px", borderRadius: 6 }}>✅ {custSuccess}</div>}
             <div style={{ display: "flex", gap: 8 }}>
               <button
-                onClick={() => { setShowAddForm(false); setCustError(""); }}
+                onClick={() => { setShowAddForm(false); setEditingCustomerId(null); setCustError(""); }}
                 style={{ flex: 1, padding: "11px 0", background: "#f3f4f6", color: "#374151", border: "none", borderRadius: 8, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
                 Cancel
               </button>
               <button
                 onClick={handleCreate}
                 style={{ flex: 2, padding: "11px 0", background: "#16a34a", color: "#fff", border: "none", borderRadius: 8, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
-                ✅ Create Customer
+                ✅ {editingCustomerId ? "Update" : "Create"} Customer
               </button>
             </div>
           </div>
@@ -171,11 +228,19 @@ export function CustomersTab({
           const spent       = txns.filter((t) => !t.void && !t.cancelled).reduce((s, t) => s + (t.total || 0), 0);
           const outstanding = getCustomerOutstanding(c.id);
           return (
-            <div key={c.id} onClick={() => onViewLedger(c)} style={{ padding: "12px 0", borderBottom: i < filtered.length - 1 ? "1px solid #f3f4f6" : "none", cursor: "pointer" }}>
+            <div key={c.id} style={{ padding: "12px 0", borderBottom: i < filtered.length - 1 ? "1px solid #f3f4f6" : "none", cursor: "pointer" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                <div>
+                <div style={{ flex: 1, onClick: () => onViewLedger(c) }}>
                   <div style={{ fontWeight: 600, fontSize: 14 }}>{c.name}</div>
                   <div style={{ fontSize: 12, color: "#9ca3af" }}>{c.phone || "No phone"} · {txns.length} bill{txns.length !== 1 ? "s" : ""}</div>
+                  
+                  {/* FEATURE 7: Display GSTIN if available */}
+                  {c.gstin && (
+                    <div style={{ fontSize: 11, color: "#7c3aed", fontWeight: 600, marginTop: 3 }}>
+                      GSTIN: {c.gstin}
+                    </div>
+                  )}
+                  
                   {outstanding > 0 && (
                     <div style={{ fontSize: 12, color: "#dc2626", fontWeight: 700, marginTop: 2 }}>⚠ Outstanding: {f(outstanding)}</div>
                   )}
@@ -187,6 +252,11 @@ export function CustomersTab({
                   <div style={{ fontWeight: 700, color: "#1e3a5f", fontSize: 14 }}>{f(spent)}</div>
                   <div style={{ fontSize: 11, color: "#9ca3af" }}>total billed</div>
                   <div style={{ display: "flex", gap: 4 }}>
+                    {/* FEATURE 7: Edit button for adding/editing GSTIN */}
+                    <button onClick={(e) => { e.stopPropagation(); handleEditCustomer(c); }}
+                      style={{ padding: "4px 10px", background: "#dbeafe", color: "#2563eb", border: "none", borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: "pointer" }}>
+                      ✏️ Edit
+                    </button>
                     {outstanding > 0 && (
                       <button onClick={(e) => { e.stopPropagation(); onSettle(c); }}
                         style={{ padding: "4px 10px", background: "#16a34a", color: "#fff", border: "none", borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: "pointer" }}>
