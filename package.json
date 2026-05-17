@@ -10,7 +10,7 @@
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
-    "postbuild": "xcopy api build\api /E /I /Y"
+    "postbuild": "mkdir -p build/api && cp -r api/* build/api"
   },
   "browserslist": {
     "production": [
