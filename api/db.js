@@ -362,13 +362,19 @@ export default async function handler(req, res) {
     }
 
     // ── getAll ──────────────────────────────────────────────
-    if (action === "getAll") {
-      const order = table === "products" ? "created_at.asc" : "created_at.desc";
-      const r     = await fetch(sb(`${table}?id=like.${encodeURIComponent(shopCode + "::")}*&order=${order}`), { headers });
-      const rows  = await r.json();
-return res.status(200).json(Array.isArray(rows) ? rows : []);
-    }
-
+   // ── getAll ──────────────────────────────────────────────
+if (action === "getAll") {
+  const order = table === "products" ? "created_at.asc" : "created_at.desc";
+  const url = sb(`${table}?id=like.${encodeURIComponent(shopCode + "::")}*&order=${order}`);
+  console.log("getAll URL:", url);
+  const r = await fetch(url, { headers });
+  const rows = await r.json();
+  console.log("getAll rows:", rows);
+  if (!Array.isArray(rows)) {
+    return res.status(200).json([]);
+  }
+  return res.status(200).json(rows.map((r) => r.data || r));
+}
     // ── upsert ──────────────────────────────────────────────
     if (action === "upsert") {
       const fullId = `${shopCode}::${id}`;
