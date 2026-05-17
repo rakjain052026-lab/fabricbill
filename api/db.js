@@ -366,7 +366,7 @@ export default async function handler(req, res) {
       const order = table === "products" ? "created_at.asc" : "created_at.desc";
       const r     = await fetch(sb(`${table}?id=like.${encodeURIComponent(shopCode + "::")}*&order=${order}`), { headers });
       const rows  = await r.json();
-      return res.status(200).json(Array.isArray(rows) ? rows.map((r) => r.data) : []);
+return res.status(200).json(Array.isArray(rows) ? rows : []);
     }
 
     // ── upsert ──────────────────────────────────────────────
