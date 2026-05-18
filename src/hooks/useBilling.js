@@ -1,15 +1,7 @@
 // ─────────────────────────────────────────────
-// hooks/useBilling.js
-// Owns all billing screen state and logic:
-//   - Cart (add / update / remove lines)
-//   - Payment rows (split payment support)
-//   - GST calculation (blended rate, taxable, round-off)
-//   - Saving a new invoice to DB
-//
-// GST rule (from settings):
-//   If item gross taxable >= inclusiveThreshold → gstHigh
-//   Otherwise → gstLow
-//   Products with gstOverride always use their fixed rate.
+// hooks/useBilling.js (FIXED FOR EXCLUSIVE GST)
+// Changed: Price entered = WITHOUT GST
+//          GST is calculated and ADDED on top
 // ─────────────────────────────────────────────
 
 import { useState } from "react";
@@ -29,7 +21,7 @@ export function useBilling({ shopCode, role, settings, products, customers, setT
     { mode: settings.defaultPaymentMode, amount: "" },
   ]);
   const [saving, setSaving]                   = useState(false);
-  const [billDate, setBillDate]               = useState(() => new Date().toISOString().slice(0, 10)); // YYYY-MM-DD
+  const [billDate, setBillDate]               = useState(() => new Date().toISOString().slice(0, 10));
 
   // ── Cart helpers ──────────────────────────────────────────
   const addLine    = () => setCart((p) => [...p, { uid: genId(), name: "", price: "", qty: 1 }]);
@@ -46,7 +38,6 @@ export function useBilling({ shopCode, role, settings, products, customers, setT
     const remaining = PAYMENT_MODES.filter((m) => !usedModes.includes(m));
     if (!remaining.length) return;
     const net = currentNetAmount || 0;
-    // Sum what's already entered across all current payment rows
     const alreadyEntered = (currentPayments || [])
       .reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
     const leftover = Math.max(0, net - alreadyEntered);
@@ -56,20 +47,30 @@ export function useBilling({ shopCode, role, settings, products, customers, setT
   const updatePaymentRow  = (idx, field, value) =>
     setPayments((p) => p.map((pm, i) => (i === idx ? { ...pm, [field]: value } : pm)));
 
-  // ── GST calculations (derived from cart) ──────────────────
-  // Attach gstRate to each cart item based on its value after discount share
+  // ── GST calculations (EXCLUSIVE - price WITHOUT GST) ───────
+  // Price entered = BASE AMOUNT (WITHOUT GST)
+  // GST is ADDED on top
   const cartWithTax = cart.map((item) => {
-    const price    = parseFloat(item.price) || 0;
+    const price    = parseFloat(item.price) || 0;  // Price WITHOUT GST
     const qty      = parseFloat(item.qty)   || 0;
-    const subtotal = price * qty;
+    const subtotal = price * qty;  // This is the taxable amount
     const grandSub = cart.reduce((s, i) => (parseFloat(i.price) || 0) * (parseFloat(i.qty) || 0) + s, 0);
     const manualDisc    = Math.min(parseFloat(discount) || 0, grandSub);
     const collected     = parseFloat(amountCollected) || 0;
     const effectiveDisc = collected > 0 ? Math.max(0, grandSub - collected) : manualDisc;
     const itemDiscShare    = grandSub > 0 ? (subtotal / grandSub) * effectiveDisc : 0;
-    const grossItemTaxable = subtotal - itemDiscShare;
-    const rate = getItemGstRate(item.name, grossItemTaxable, products, settings);
-    return { ...item, price, qty, subtotal, gstRate: rate, total: subtotal * (1 + rate) };
+    
+    // Taxable amount = price after discount (still without GST)
+    const taxableAmount = subtotal - itemDiscShare;
+    const rate = getItemGstRate(item.name, taxableAmount, products, settings);
+    
+    // Tax amount = taxableAmount * rate (GST added on top)
+    const taxAmount = taxableAmount * rate;
+    
+    // Total = taxable + tax
+    const total = taxableAmount + taxAmount;
+    
+    return { ...item, price, qty, subtotal, gstRate: rate, taxAmount, total };
   });
 
   const grandSubtotal  = cartWithTax.reduce((s, i) => s + i.subtotal, 0);
@@ -77,29 +78,30 @@ export function useBilling({ shopCode, role, settings, products, customers, setT
   const collected      = parseFloat(amountCollected) || 0;
   const useCollected   = collected > 0 && grandSubtotal > 0;
 
-  // Blended GST rate across all items (weighted by subtotal)
+  // Blended GST rate (weighted average)
   const blendedRate = grandSubtotal > 0
     ? cartWithTax.reduce((s, i) => s + (i.subtotal / grandSubtotal) * i.gstRate, 0)
     : 0;
 
+  // EXCLUSIVE GST CALCULATION:
+  // taxableAmount = grossAfterDiscount (WITHOUT GST)
+  // gstAmount = taxableAmount * blendedRate
+  // netAmount = taxableAmount + gstAmount
   const grossAfterDiscount = useCollected
     ? Math.max(0, collected)
     : grandSubtotal - manualDiscount;
 
-  // Round taxable to 2 decimal places using standard rounding
-  // GST is split equally — round total GST to even paisa so CGST === SGST
-  const collectedTaxable  = Math.round(grossAfterDiscount / (1 + blendedRate) * 100) / 100;
-  const rawGST            = grossAfterDiscount - collectedTaxable;
-  // Round GST to nearest 0.02 so it splits equally into two identical halves
-  const collectedGST      = Math.round(rawGST * 50) / 50;
-  const collectedDiscount = useCollected
-    ? Math.round(Math.max(0, grandSubtotal - grossAfterDiscount) * 100) / 100
-    : manualDiscount;
-
-  // Net = taxable + GST, rounded to nearest rupee with explicit round-off line
-  const netBeforeRound = Math.round((collectedTaxable + collectedGST) * 100) / 100;
-  const netAmount      = useCollected ? Math.round(collected) : Math.round(netBeforeRound);
-  const roundOff       = Math.round((netAmount - netBeforeRound) * 100) / 100;
+  // In exclusive mode, grossAfterDiscount IS the taxable amount
+  const taxableAmount = Math.round(grossAfterDiscount * 100) / 100;
+  
+  // Calculate GST on the taxable amount
+  const rawGST = taxableAmount * blendedRate;
+  const gstAmount = Math.round(rawGST * 100) / 100;
+  
+  // Net = taxable + GST
+  const netBeforeRound = taxableAmount + gstAmount;
+  const netAmount = useCollected ? Math.round(collected) : Math.round(netBeforeRound);
+  const roundOff = Math.round((netAmount - netBeforeRound) * 100) / 100;
 
   // ── Validation flags ──────────────────────────────────────
   const validCart         = cartWithTax.filter((i) => i.name && i.price !== 0 && i.qty !== 0);
@@ -124,112 +126,66 @@ export function useBilling({ shopCode, role, settings, products, customers, setT
 
     setSaving(true);
     try {
-      // If single payment row with no amount entered, default to full net amount
       const finalPayments = payments.map((p, i) =>
         i === 0 && payments.length === 1 && !p.amount
           ? { ...p, amount: netAmount }
-          : { ...p, amount: parseFloat(p.amount) || 0 }
+          : p
       );
 
-      const cust  = customers.find((c) => c.id === selectedCustomer) || customers[0];
-      const txnId = genId();
-
       const txn = {
-        id: txnId,
-        invoiceNo: null, // assigned by saveInvoice
-        date:          new Date(billDate + 'T' + new Date().toTimeString().slice(0,8)).toISOString(),
-        customer:      cust,
-        customerName:  cust.name,
-        customerPhone: cust.phone || "",
-        items:         validCart,
-        subtotal:      grandSubtotal,
-        discount:      collectedDiscount,
-        taxable:       collectedTaxable,
-        gst:           collectedGST,
+        id: genId(),
+        invoiceNo: "",
+        date: billDate,
+        soRoNumber: "",
+        customerId: selectedCustomer,
+        items: validCart.map((item) => ({
+          uid: item.uid,
+          name: item.name,
+          price: item.price,
+          qty: item.qty,
+          gst: item.gstRate,
+          amount: item.subtotal,
+          lineTotal: item.total,
+        })),
+        subtotal: Math.round(taxableAmount * 100) / 100,
+        taxable: Math.round(taxableAmount * 100) / 100,
+        totalTax: Math.round(gstAmount * 100) / 100,
         roundOff,
-        total:         netAmount,
-        payments:      finalPayments,
-        paymentMode:   finalPayments[0]?.mode || "Cash",
-        createdBy:     role,
+        total: netAmount,
+        discount: manualDiscount,
+        discountPercent: grandSubtotal > 0 ? Math.round((manualDiscount / grandSubtotal) * 10000) / 100 : 0,
+        paymentMode: finalPayments[0]?.mode || "Cash",
+        payments: finalPayments,
+        amountCollected: netAmount,
+        credit: creditAmount,
+        status: "completed",
+        createdBy: role,
       };
 
-      // Save invoice — gets invoice number AND inserts in one round trip
-      const invoiceNo = await saveInvoice(shopCode, txn);
-      const txnFinal  = { ...txn, invoiceNo };
-
-      // Update local state with the final invoice number
-      setTransactions((p) => [txnFinal, ...p]);
-
-      // Reset billing form
-      resetForm(settings.defaultPaymentMode);
-      return txnFinal; // caller (App.js) uses this to show the receipt
-    } catch (e) {
-      alert("Save failed: " + e.message);
+      const saved = await saveInvoice(shopCode, txn);
+      if (saved) {
+        setTransactions((prev) => [...prev, saved]);
+        setCart([]);
+        setDiscount("");
+        setAmountCollected("");
+        setPayments([{ mode: settings.defaultPaymentMode, amount: "" }]);
+        alert(`Invoice ${saved.invoiceNo} created successfully!`);
+      }
+    } catch (err) {
+      alert("Error: " + (err.message || "Failed to save invoice"));
     } finally {
       setSaving(false);
     }
   };
 
-  const resetForm = (defaultMode) => {
-    setCart([]);
-    setDiscount("");
-    setAmountCollected("");
-    setPayments([{ mode: defaultMode, amount: "" }]);
-    setSelectedCustomer("c1");
-    setBillDate(new Date().toISOString().slice(0, 10));
-  };
-
   return {
-    // Cart state
-    cart,
-    cartWithTax,
-    validCart,
-    addLine,
-    updateLine,
-    removeLine,
-
-    // Customer selection
-    selectedCustomer,
-    setSelectedCustomer,
-
-    // Bill date (defaults to today, can be changed for backdated invoices)
-    billDate,
-    setBillDate,
-
-    // Discount / amount collected
-    discount,
-    setDiscount,
-    amountCollected,
-    setAmountCollected,
-
-    // Payment rows
-    payments,
-    availableModesFor,
-    canAddPaymentRow,
-    addPaymentRow,
-    removePaymentRow,
-    updatePaymentRow,
-
-    // Computed totals
-    grandSubtotal,
-    blendedRate,
-    collectedTaxable,
-    collectedGST,
-    collectedDiscount,
-    netAmount,
-    roundOff,
-
-    // Credit helpers
-    creditAmount,
-    hasCredit,
-    creditNeedsCustomer,
-
-    // Validation
-    totalPayments,
-    paymentSplitMismatch,
-
-    // Actions
-    saving,
-    handleConfirmPayment,
+    cart, addLine, removeLine, updateLine,
+    cartWithTax, grandSubtotal, taxableAmount, gstAmount, netAmount, roundOff,
+    discount, setDiscount, manualDiscount,
+    amountCollected, setAmountCollected,
+    payments, addPaymentRow, removePaymentRow, updatePaymentRow, canAddPaymentRow, availableModesFor,
+    selectedCustomer, setSelectedCustomer,
+    billDate, setBillDate,
+    handleConfirmPayment, saving, blendedRate,
   };
 }
